@@ -131,7 +131,9 @@ public static class PacketInGamePurchasePlaceOrderPacketHandler
                 return true;
             }
 
-            if (clientItemDefinition.Type == 1 || clientItemDefinition.Type == 12)
+            if (clientItemDefinition.Type == 1 ||
+                clientItemDefinition.Type == 2 || // Pets
+                clientItemDefinition.Type == 12)
             {
                 var totalQuantity = orderDetail.Quantity * bundleEntry.Quantity;
 
