@@ -1,0 +1,1453 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+
+using Microsoft.Extensions.DependencyInjection;
+
+using Sanctuary.Core.Extensions;
+using Sanctuary.Core.IO;
+using Sanctuary.Game.Entities;
+using Sanctuary.Game.Resources.Definitions.Zones;
+using Sanctuary.Packet;
+using Sanctuary.Packet.Common;
+
+namespace Sanctuary.Game.Zones;
+
+public sealed class StartingZone : BaseZone
+{
+    private readonly IZoneManager _zoneManager;
+    private readonly IResourceManager _resourceManager;
+    private readonly StartingZoneDefinition _zoneDefinition;
+
+    public StartingZone(StartingZoneDefinition zoneDefinition, IServiceProvider serviceProvider)
+        : base(zoneDefinition, serviceProvider)
+    {
+        _zoneDefinition = zoneDefinition;
+
+        _zoneManager = serviceProvider.GetRequiredService<IZoneManager>();
+        _resourceManager = serviceProvider.GetRequiredService<IResourceManager>();
+    }
+
+    #region Client Is Ready
+
+    public override void OnClientIsReady(Player player)
+    {
+        SendQuickChatData(player);
+
+        SendPointOfInterests(player);
+
+        SendUpdateStat(player);
+
+        var clientUpdatePacketHitpoints = new ClientUpdatePacketHitpoints
+        {
+            CurrentHitpoints = 2500,
+            MaxHitpoints = 2500
+        };
+
+        player.SendTunneled(clientUpdatePacketHitpoints);
+
+        var clientUpdatePacketMana = new ClientUpdatePacketMana
+        {
+            CurrentMana = 100,
+            MaxMana = 100
+        };
+
+        player.SendTunneled(clientUpdatePacketMana);
+
+        SendReferenceData(player);
+
+        SendCoinStoreItemList(player);
+
+        SendAdventurersJournalInfo(player);
+
+        SendWelcomeInfo(player);
+
+        SendPlayerCustomizations(player);
+
+        SendMembershipSubscriptionInfo(player);
+
+        SendListOfActivities(player);
+
+        SendInGamePurchase(player);
+
+        var packetZoneDoneSendingInitialData = new PacketZoneDoneSendingInitialData();
+
+        player.SendTunneled(packetZoneDoneSendingInitialData);
+
+        var clientUpdatePacketDoneSendingPreloadCharacters = new ClientUpdatePacketDoneSendingPreloadCharacters();
+
+        player.SendTunneled(clientUpdatePacketDoneSendingPreloadCharacters);
+
+        SendFriendList(player);
+        SendIgnoreList(player);
+
+        UpdateFriendStatus(player);
+    }
+
+    private void SendQuickChatData(Player player)
+    {
+        var quickChatSendDataPacket = new QuickChatSendDataPacket();
+
+        quickChatSendDataPacket.QuickChats = _resourceManager.QuickChats.ToDictionary();
+
+        player.SendTunneled(quickChatSendDataPacket);
+    }
+
+    private void SendPointOfInterests(Player player)
+    {
+        var packetPointOfInterestDefinitionReply = new PacketPointOfInterestDefinitionReply();
+        using var writer = new PacketWriter();
+
+        foreach (var pointOfInterest in _resourceManager.PointOfInterests.Values)
+        {
+            writer.Write(true);
+
+            pointOfInterest.Serialize(writer);
+        }
+
+        writer.Write(false);
+
+        packetPointOfInterestDefinitionReply.Payload = writer.Buffer;
+
+        player.SendTunneled(packetPointOfInterestDefinitionReply);
+    }
+
+    private void SendUpdateStat(Player player)
+    {
+        var clientUpdatePacketUpdateStat = new ClientUpdatePacketUpdateStat();
+
+        clientUpdatePacketUpdateStat.Guid = player.Guid;
+
+        // TODO
+        clientUpdatePacketUpdateStat.Stats.AddRange(
+        [
+            new CharacterStat(CharacterStatId.MaxHealth, 2500),
+            new CharacterStat(CharacterStatId.MaxMovementSpeed, 8f),
+            new CharacterStat(CharacterStatId.WeaponRange, 5f),
+            new CharacterStat(CharacterStatId.HitPointRegen, 25),
+            new CharacterStat(CharacterStatId.MaxMana, 100),
+            new CharacterStat(CharacterStatId.ManaRegen, 4),
+            new CharacterStat(CharacterStatId.MeleeChanceToHit, 100),
+            new CharacterStat(CharacterStatId.MeleeWeaponDamageMultiplier, 1f),
+            new CharacterStat(CharacterStatId.MeleeHandToHandDamage, 1),
+            new CharacterStat(CharacterStatId.EquippedMeleeWeaponDamage, 1),
+            new CharacterStat(CharacterStatId.MeleeAttackIntervalMs, 2000),
+            new CharacterStat(CharacterStatId.DamageMultiplier, 1f),
+            new CharacterStat(CharacterStatId.HealingMultiplier, 1f),
+            new CharacterStat(CharacterStatId.AbilityCriticalHitMultiplier, 1f),
+            new CharacterStat(CharacterStatId.HeadInflationPercent, 100),
+            new CharacterStat(CharacterStatId.RangeMultiplier, 1f),
+            new CharacterStat(CharacterStatId.FactoryProductionModifier, 1f),
+            new CharacterStat(CharacterStatId.FactoryYieldModifier, 1f),
+            new CharacterStat(CharacterStatId.InCombatHitPointRegen, 6),
+            new CharacterStat(CharacterStatId.InCombatManaRegen, 4)
+        ]);
+
+        player.SendTunneled(clientUpdatePacketUpdateStat);
+    }
+
+    private void SendReferenceData(Player player)
+    {
+        var referenceDataPacketItemClassDefinitions = new ReferenceDataPacketItemClassDefinitions();
+
+        referenceDataPacketItemClassDefinitions.ItemClasses = _resourceManager.ItemClasses.ToDictionary();
+
+        player.SendTunneled(referenceDataPacketItemClassDefinitions);
+
+        var referenceDataPacketItemCategoryDefinitions = new ReferenceDataPacketItemCategoryDefinitions();
+
+        referenceDataPacketItemCategoryDefinitions.ItemCategories = _resourceManager.ItemCategories.ToDictionary();
+        referenceDataPacketItemCategoryDefinitions.ItemCategoryGroups = _resourceManager.ItemCategoryGroups.ToDictionary();
+
+        player.SendTunneled(referenceDataPacketItemCategoryDefinitions);
+
+        var referenceDataPacketClientProfileData = new ReferenceDataPacketClientProfileData();
+
+        referenceDataPacketClientProfileData.Profiles = _resourceManager.Profiles.ToDictionary();
+
+        player.SendTunneled(referenceDataPacketClientProfileData);
+    }
+
+    private void SendCoinStoreItemList(Player player)
+    {
+        var coinStoreItemListPacket = new CoinStoreItemListPacket();
+
+        coinStoreItemListPacket.StaticItems = _resourceManager.CoinStoreItems.ToDictionary();
+
+        player.SendTunneled(coinStoreItemListPacket);
+
+        var clientItemDefinitions = new List<ClientItemDefinition>();
+
+        foreach (var coinStoreItem in _resourceManager.CoinStoreItems)
+        {
+            if (!_resourceManager.ClientItemDefinitions.TryGetValue(coinStoreItem.Key, out var clientItemDefinition))
+                continue;
+
+            clientItemDefinitions.Add(clientItemDefinition);
+        }
+
+        using var writer = new PacketWriter();
+
+        writer.Write(clientItemDefinitions);
+
+        var playerUpdatePacketItemDefinitions = new PlayerUpdatePacketItemDefinitions();
+
+        playerUpdatePacketItemDefinitions.Payload = writer.Buffer;
+
+        player.SendTunneled(playerUpdatePacketItemDefinitions);
+    }
+
+    private void SendAdventurersJournalInfo(Player player)
+    {
+        // DO NOT REMOVE even if it's not fully implemented. This packet is needed
+        // due to an Area Definition called "Newbiezone" in FabledRealmsAreas.xml.
+
+        var adventurersJournal = new AdventurersJournalInfoPacket();
+
+        AdventurersJournalRegionDefinition[] regions =
+        [
+            new()
+            {
+                Id = 1,
+                NameId = 5100069,
+                DescriptionId = 5100031,
+                TabImageId = 35449,
+                ChapterMapImageId = 0,
+                GeometryId = 244,
+                CompletedStringId = 5101408
+            },
+            new()
+            {
+                Id = 2,
+                NameId = 442123,
+                DescriptionId = 5100032,
+                TabImageId = 9532,
+                ChapterMapImageId = 0,
+                GeometryId = 5,
+                CompletedStringId = 442681,
+            },
+            new()
+            {
+                Id = 3,
+                NameId = 3501,
+                DescriptionId = 2129,
+                TabImageId = 9538,
+                ChapterMapImageId = 0,
+                GeometryId = 8,
+                CompletedStringId = 5101409,
+            },
+            new()
+            {
+                Id = 4,
+                NameId = 3505,
+                DescriptionId = 442685,
+                TabImageId = 9529,
+                ChapterMapImageId = 0,
+                GeometryId = 1,
+                CompletedStringId = 442686,
+            }
+        ];
+
+        adventurersJournal.Regions = regions.ToDictionary(x => x.Id);
+
+        AdventurersJournalHubDefinition[] hubs =
+        [
+            new()
+            {
+                Id = 1,
+                RegionId = 1,
+                DisplayOrder = 1,
+                NameId = 442216,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44310,
+                CompletedDescriptionId = 5100071,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 2,
+                RegionId = 1,
+                DisplayOrder = 2,
+                NameId = 18735,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44311,
+                CompletedDescriptionId = 5100072,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 3,
+                RegionId = 1,
+                DisplayOrder = 3,
+                NameId = 5100069,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44309,
+                CompletedDescriptionId = 5100073,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 4,
+                RegionId = 2,
+                DisplayOrder = 1,
+                NameId = 7262,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44941,
+                CompletedDescriptionId = 442125,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 5,
+                RegionId = 2,
+                DisplayOrder = 2,
+                NameId = 428995,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44942,
+                CompletedDescriptionId = 442126,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 6,
+                RegionId = 2,
+                DisplayOrder = 3,
+                NameId = 442124,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44945,
+                CompletedDescriptionId = 442127,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 7,
+                RegionId = 2,
+                DisplayOrder = 4,
+                NameId = 4428,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 44943,
+                CompletedDescriptionId = 442128,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 8,
+                RegionId = 3,
+                DisplayOrder = 1,
+                NameId = 5101823,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 45267,
+                CompletedDescriptionId = 5101824,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 9,
+                RegionId = 3,
+                DisplayOrder = 2,
+                NameId = 5101825,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 45268,
+                CompletedDescriptionId = 5101826,
+                MapX = 0,
+                MapY = 0
+            },
+            new()
+            {
+                Id = 10,
+                RegionId = 4,
+                DisplayOrder = 1,
+                NameId = 442623,
+                ActiveImageSetId = 19,
+                ImageSetId = 44308,
+                CompletedImageSetId = 45600,
+                CompletedDescriptionId = 442687,
+                MapX = 0,
+                MapY = 0
+            }
+        ];
+
+        adventurersJournal.Hubs = hubs.ToDictionary(x => x.Id);
+
+        AdventurersJournalHubQuestDefinition[] hubQuests =
+        [
+            new()
+            {
+                HubId = 1,
+                Id = 2514,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 1,
+                Id = 2513,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2521,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2526,
+                Unknown = 7
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2522,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2523,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2524,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 2,
+                Id = 2525,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 3,
+                Id = 2529,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 3,
+                Id = 2528,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 3,
+                Id = 2527,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 3,
+                Id = 2566,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 3,
+                Id = 2530,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2493,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2492,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2491,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2490,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2489,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 4,
+                Id = 2538,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2498,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2497,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2496,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2495,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2494,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 5,
+                Id = 2531,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 6,
+                Id = 2502,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 6,
+                Id = 2501,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 6,
+                Id = 2500,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 6,
+                Id = 2499,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 6,
+                Id = 2503,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2533,
+                Unknown = 7
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2532,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2504,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2508,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2507,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2505,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 7,
+                Id = 2506,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 8,
+                Id = 2580,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 8,
+                Id = 2578,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 8,
+                Id = 2579,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 8,
+                Id = 2577,
+                Unknown = 2
+            },
+            new()
+            {
+                HubId = 8,
+                Id = 2576,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2585,
+                Unknown = 10
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2584,
+                Unknown = 9
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2583,
+                Unknown = 8
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2582,
+                Unknown = 7
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2581,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 9,
+                Id = 2600,
+                Unknown = 11
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2595,
+                Unknown = 6
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2594,
+                Unknown = 5
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2591,
+                Unknown = 4
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2590,
+                Unknown = 3
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2596,
+                Unknown = 7
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2588,
+                Unknown = 1
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2599,
+                Unknown = 10
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2598,
+                Unknown = 9
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2597,
+                Unknown = 8
+            },
+            new()
+            {
+                HubId = 10,
+                Id = 2589,
+                Unknown = 2
+            }
+        ];
+
+        adventurersJournal.HubQuests = hubQuests.ToDictionary(x => x.Id);
+
+        AdventurersJournalStickerDefinition[] stickers =
+        [
+            new()
+            {
+                Id = 1,
+                RegionId = 1,
+                DisplayOrder = 1,
+                QuestId = 2563,
+                NameId = 5100479,
+                DescriptionId = 5100480,
+                CompletedImageSetId = 43279,
+                ImageSetId = 43278,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 2,
+                RegionId = 1,
+                DisplayOrder = 2,
+                QuestId = 2564,
+                NameId = 5100483,
+                DescriptionId = 5100484,
+                CompletedImageSetId = 43287,
+                ImageSetId = 43286,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 3,
+                RegionId = 1,
+                DisplayOrder = 3,
+                QuestId = 2565,
+                NameId = 5100487,
+                DescriptionId = 5100488,
+                CompletedImageSetId = 43273,
+                ImageSetId = 43272,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 4,
+                RegionId = 1,
+                DisplayOrder = 4,
+                QuestId = 2572,
+                NameId = 5100772,
+                DescriptionId = 5100773,
+                CompletedImageSetId = 43281,
+                ImageSetId = 43280,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 5,
+                RegionId = 1,
+                DisplayOrder = 5,
+                QuestId = 2573,
+                NameId = 5100776,
+                DescriptionId = 5100777,
+                CompletedImageSetId = 43291,
+                ImageSetId = 43290,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 6,
+                RegionId = 1,
+                DisplayOrder = 6,
+                QuestId = 2587,
+                NameId = 5101187,
+                DescriptionId = 5101188,
+                CompletedImageSetId = 43283,
+                ImageSetId = 43282,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 16,
+                RegionId = 2,
+                DisplayOrder = 1,
+                QuestId = 2568,
+                NameId = 5100756,
+                DescriptionId = 5100757,
+                CompletedImageSetId = 43305,
+                ImageSetId = 43304,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 17,
+                RegionId = 2,
+                DisplayOrder = 2,
+                QuestId = 2569,
+                NameId = 5100760,
+                DescriptionId = 5100761,
+                CompletedImageSetId = 43287,
+                ImageSetId = 43286,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 18,
+                RegionId = 2,
+                DisplayOrder = 3,
+                QuestId = 2570,
+                NameId = 5100764,
+                DescriptionId = 5100765,
+                CompletedImageSetId = 43273,
+                ImageSetId = 43272,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 19,
+                RegionId = 2,
+                DisplayOrder = 4,
+                QuestId = 2571,
+                NameId = 5100768,
+                DescriptionId = 5100769,
+                CompletedImageSetId = 43279,
+                ImageSetId = 43278,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 20,
+                RegionId = 2,
+                DisplayOrder = 5,
+                QuestId = 2574,
+                NameId = 5100780,
+                DescriptionId = 5100781,
+                CompletedImageSetId = 43277,
+                ImageSetId = 43276,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 21,
+                RegionId = 2,
+                DisplayOrder = 6,
+                QuestId = 2575,
+                NameId = 5100784,
+                DescriptionId = 5100785,
+                CompletedImageSetId = 43283,
+                ImageSetId = 43282,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 32,
+                RegionId = 3,
+                DisplayOrder = 2,
+                QuestId = 2602,
+                NameId = 442851,
+                DescriptionId = 442857,
+                CompletedImageSetId = 43287,
+                ImageSetId = 43286,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 35,
+                RegionId = 3,
+                DisplayOrder = 5,
+                QuestId = 2605,
+                NameId = 442854,
+                DescriptionId = 442860,
+                CompletedImageSetId = 43279,
+                ImageSetId = 43278,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 36,
+                RegionId = 3,
+                DisplayOrder = 6,
+                QuestId = 2606,
+                NameId = 442855,
+                DescriptionId = 442861,
+                CompletedImageSetId = 43305,
+                ImageSetId = 43304,
+                Unknown = 0
+            },
+            new()
+            {
+                Id = 37,
+                RegionId = 4,
+                DisplayOrder = 1,
+                QuestId = 2592,
+                NameId = 0,
+                DescriptionId = 0,
+                CompletedImageSetId = 0,
+                ImageSetId = 0,
+                Unknown = 0
+            }
+        ];
+
+        adventurersJournal.Stickers = stickers.ToDictionary(x => x.Id);
+
+        player.SendTunneled(adventurersJournal);
+    }
+
+    private void SendWelcomeInfo(Player player)
+    {
+        var packetLoadWelcomeScreen = new PacketLoadWelcomeScreen();
+
+        packetLoadWelcomeScreen.Contents.AddRange(
+        [
+            new ContentInfo
+            {
+                NameId = 6185,
+                DescriptionId = 6186,
+            },
+            new ContentInfo
+            {
+                NameId = 6187,
+                DescriptionId = 6188,
+            },
+            new ContentInfo
+            {
+                NameId = 6189,
+                DescriptionId = 6190,
+            }
+        ]);
+
+        packetLoadWelcomeScreen.ClaimCodes.AddRange(
+        [
+            new ClaimCodeInfo
+            {
+                Code = "MMMDONUT",
+                NameId = 401519,
+                DescriptionId = 401534,
+                IconId = 929
+            },
+            new ClaimCodeInfo
+            {
+                Code = "BERRYCUPCAKE",
+                NameId = 401517,
+                DescriptionId = 401532,
+                IconId = 939
+            },
+            new ClaimCodeInfo
+            {
+                Code = "SKELETAL",
+                NameId = 409157,
+                DescriptionId = 109132,
+                IconId = 3459
+            },
+            new ClaimCodeInfo
+            {
+                Code = "STRAWBERRIES",
+                NameId = 409158,
+                DescriptionId = 108948,
+                IconId = 3441
+            },
+            new ClaimCodeInfo
+            {
+                Code = "FROGGY",
+                NameId = 409159,
+                DescriptionId = 3141,
+                IconId = 1258
+            },
+            new ClaimCodeInfo
+            {
+                Code = "SANDWICH",
+                NameId = 409160,
+                DescriptionId = 2430,
+                IconId = 949
+            }
+        ]);
+
+        player.SendTunneled(packetLoadWelcomeScreen);
+    }
+
+    private void SendPlayerCustomizations(Player player)
+    {
+        var playerUpdatePacketCustomizationData = new PlayerUpdatePacketCustomizationData();
+
+        var customizations = new[]
+        {
+            new PlayerCustomizationData
+            {
+                Id = 0, // Head
+                Param = player.HeadId,
+                StringParam = player.Head
+            },
+            new PlayerCustomizationData
+            {
+                Id = 1, // Skin Tone
+                Param = player.SkinToneId,
+                StringParam = player.SkinTone
+            },
+            new PlayerCustomizationData
+            {
+                Id = 2, // Hair
+                Param = player.HairId,
+                StringParam = player.Hair
+            },
+            new PlayerCustomizationData
+            {
+                Id = 3, // Hair Color
+                Param = player.HairColor
+            },
+            new PlayerCustomizationData
+            {
+                Id = 4, // Eye Color
+                Param = player.EyeColor
+            },
+            new PlayerCustomizationData
+            {
+                Id = 5, // Model Customization
+                Param = player.ModelCustomizationId,
+                StringParam = player.ModelCustomization
+            },
+            new PlayerCustomizationData
+            {
+                Id = 6, // Face Paint
+                Param = player.FacePaintId,
+                StringParam = player.FacePaint
+            },
+            new PlayerCustomizationData
+            {
+                Id = 8, // Model
+                Param = player.Model
+            }
+        };
+
+        playerUpdatePacketCustomizationData.Customizations.AddRange(customizations);
+
+        player.SendTunneled(playerUpdatePacketCustomizationData);
+    }
+
+    private void SendMembershipSubscriptionInfo(Player player)
+    {
+        var packetMembershipSubscriptionInfo = new PacketMembershipSubscriptionInfo
+        {
+            IsMember = player.MembershipStatus != 0
+        };
+
+        player.SendTunneled(packetMembershipSubscriptionInfo);
+    }
+
+    private void SendListOfActivities(Player player)
+    {
+        /* var activityProfileListPacket = new ActivityProfileListPacket
+        {
+            Activities = new Dictionary<int, ActivityForProfileType>()
+            {
+                {
+                    // Fisherman
+                    137, new ActivityForProfileType
+                    {
+                        ProfileId = 137,
+                        QuestId = 1968,
+                        IconId = 20740,
+                        BadgeId = 4843,
+                        QuestTitle = 412490,
+                        QuestDescription = 412491,
+                    }
+                },
+                {
+                    // Soccer Star
+                    52, new ActivityForProfileType
+                    {
+                        ProfileId = 52,
+                        QuestId = 1965,
+                        IconId = 20743,
+                        BadgeId = 4842,
+                        QuestTitle = 412463,
+                        QuestDescription = 412464
+                    }
+                },
+                {
+                    // Demo Derby Driver
+                    49, new ActivityForProfileType
+                    {
+                        ProfileId = 49,
+                        QuestId = 1960,
+                        IconId = 8059,
+                        BadgeId = 46,
+                        QuestTitle = 412342,
+                        QuestDescription = 412343
+                    }
+                },
+                {
+                    // Kart Driver
+                    48, new ActivityForProfileType
+                    {
+                        ProfileId = 48,
+                        QuestId = 1961,
+                        IconId = 20725,
+                        BadgeId = 46,
+                        QuestTitle = 407752,
+                        QuestDescription = 412379
+                    }
+                },
+                {
+                    // Chef
+                    45, new ActivityForProfileType
+                    {
+                        ProfileId = 45,
+                        QuestId = 1978,
+                        IconId = 156,
+                        BadgeId = 11,
+                        QuestTitle = 413021,
+                        QuestDescription = 413022
+                    }
+                },
+                {
+                    // Archer
+                    35, new ActivityForProfileType
+                    {
+                        ProfileId = 35,
+                        QuestId = 1952,
+                        IconId = 1335,
+                        BadgeId = 32,
+                        QuestTitle = 412187,
+                        QuestDescription = 412188
+                    }
+                },
+                {
+                    // Warrior
+                    32, new ActivityForProfileType
+                    {
+                        ProfileId = 32,
+                        QuestId = 1966,
+                        IconId = 21594,
+                        BadgeId = 10,
+                        QuestTitle = 412471,
+                        QuestDescription = 412472
+                    }
+                },
+                {
+                    // Miner
+                    14, new ActivityForProfileType
+                    {
+                        ProfileId = 14,
+                        QuestId = 1979,
+                        IconId = 1341,
+                        BadgeId = 11,
+                        QuestTitle = 139748,
+                        QuestDescription = 413026
+                    }
+                },
+                {
+                    // Wizard
+                    12, new ActivityForProfileType
+                    {
+                        ProfileId = 12,
+                        QuestId = 1967,
+                        IconId = 1343,
+                        BadgeId = 12,
+                        QuestTitle = 412481,
+                        QuestDescription = 412482
+                    }
+                },
+                {
+                    // Medic
+                    11, new ActivityForProfileType
+                    {
+                        ProfileId = 11,
+                        QuestId = 1962,
+                        IconId = 1340,
+                        BadgeId = 13,
+                        QuestTitle = 412422,
+                        QuestDescription = 412423
+                    }
+                },
+                {
+                    // Postman
+                    4, new ActivityForProfileType
+                    {
+                        ProfileId = 4,
+                        QuestId = 1964,
+                        IconId = 1339,
+                        BadgeId = 11,
+                        QuestTitle = 412445,
+                        QuestDescription = 412446
+                    }
+                },
+                {
+                    // Ninja
+                    2, new ActivityForProfileType
+                    {
+                        ProfileId = 2,
+                        QuestId = 1963,
+                        IconId = 1342,
+                        BadgeId = 10,
+                        QuestTitle = 412437,
+                        QuestDescription = 412438
+                    }
+                },
+                {
+                    // Brawler
+                    43, new ActivityForProfileType
+                    {
+                        ProfileId = 43,
+                        QuestId = 1593,
+                        IconId = 1337,
+                        BadgeId = 10,
+                        QuestTitle = 388503,
+                        QuestDescription = 388504
+                    }
+                },
+                {
+                    // Card Duelist
+                    120, new ActivityForProfileType
+                    {
+                        ProfileId = 120,
+                        QuestId = 1304,
+                        IconId = 396,
+                        BadgeId = 1783,
+                        QuestTitle = 103744,
+                        QuestDescription = 103745
+                    }
+                },
+                {
+                    // Blacksmith
+                    16, new ActivityForProfileType
+                    {
+                        ProfileId = 16,
+                        QuestId = 1019,
+                        IconId = 1336,
+                        BadgeId = 11,
+                        QuestTitle = 90071,
+                        QuestDescription = 90072
+                    }
+                }
+            }
+        };
+
+        player.SendTunneled(activityProfileListPacket); */
+
+        var clientActivities = _resourceManager.ClientActivityDefinitions.Values.Where(x => x.ServerType == 2).ToList();
+
+        var activityPacketListOfActivities = new ActivityPacketListOfActivities
+        {
+            ServerType = 2,
+            Activities = clientActivities
+        };
+
+        player.SendTunneled(activityPacketListOfActivities);
+
+        var clientWorldActivities = _resourceManager.ClientActivityDefinitions.Values.Where(x => x.ServerType == 1).ToList();
+
+        activityPacketListOfActivities.ServerType = 1;
+        activityPacketListOfActivities.Activities = clientWorldActivities;
+
+        player.SendTunneled(activityPacketListOfActivities);
+    }
+
+    private void SendInGamePurchase(Player player)
+    {
+        var packetInGamePurchaseEnableMarketplace = new PacketInGamePurchaseEnableMarketplace
+        {
+            Enabled = true
+        };
+
+        player.SendTunneled(packetInGamePurchaseEnableMarketplace);
+
+        var packetInGamePurchaseStoreEnablePaymentSources = new PacketInGamePurchaseStoreEnablePaymentSources
+        {
+            Sms = true,
+            Paypal = true
+        };
+
+        player.SendTunneled(packetInGamePurchaseStoreEnablePaymentSources);
+
+        var packetInGamePurchaseStoreBundleCategoryGroups = new PacketInGamePurchaseStoreBundleCategoryGroups();
+
+        packetInGamePurchaseStoreBundleCategoryGroups.CategoryGroups = _resourceManager.StoreBundleCategoryGroups.ToDictionary();
+
+        player.SendTunneled(packetInGamePurchaseStoreBundleCategoryGroups);
+
+        var packetInGamePurchaseStoreBundleCategories = new PacketInGamePurchaseStoreBundleCategories();
+
+        packetInGamePurchaseStoreBundleCategories.CategoryTree.Categories = _resourceManager.StoreBundleCategories.ToDictionary();
+
+        player.SendTunneled(packetInGamePurchaseStoreBundleCategories);
+
+        if (_resourceManager.Stores.TryGetValue(1, out var mainStore))
+        {
+            var packetInGamePurchaseStoreBundles = new PacketInGamePurchaseStoreBundles();
+
+            packetInGamePurchaseStoreBundles.StoreId = mainStore.Id;
+
+            packetInGamePurchaseStoreBundles.Store.Id = mainStore.Id;
+            packetInGamePurchaseStoreBundles.Store.NameId = mainStore.NameId;
+            packetInGamePurchaseStoreBundles.Store.DescriptionId = mainStore.DescriptionId;
+            packetInGamePurchaseStoreBundles.Store.Image = mainStore.Image;
+
+            foreach (var storeBundle in mainStore.Bundles.Values)
+            {
+                var valid = storeBundle.Entries.All(x => _resourceManager.ClientItemDefinitions.ContainsKey(x.MarketingItemId));
+
+                if (valid)
+                    packetInGamePurchaseStoreBundles.Store.Bundles.Add(storeBundle.Id, storeBundle);
+            }
+
+            player.SendTunneled(packetInGamePurchaseStoreBundles);
+        }
+
+        var packetInGamePurchaseStoreBundleGroups = new PacketInGamePurchaseStoreBundleGroups();
+
+        packetInGamePurchaseStoreBundleGroups.BundleGroups = _resourceManager.StoreBundleGroups.ToDictionary();
+
+        player.SendTunneled(packetInGamePurchaseStoreBundleGroups);
+
+        /* var inGamePurchaseUpdateSaleDisplay = new InGamePurchaseUpdateSaleDisplay();
+
+        inGamePurchaseUpdateSaleDisplay.Sales.Add(new SaleDisplayInfo
+        {
+            Id = 12951,
+            IconId = 7866,
+            TintId = 0,
+            TitleId = 824,
+            BodyId = 825,
+            SecondsLeft = 1000,
+            Unknown = 0,
+            IsMembership = false
+        });
+
+        player.SendTunneled(inGamePurchaseUpdateSaleDisplay); */
+    }
+
+    private void SendFriendList(Player player)
+    {
+        var friendListPacket = new FriendListPacket();
+
+        friendListPacket.Friends = player.Friends;
+
+        player.SendTunneled(friendListPacket);
+    }
+
+    private void SendIgnoreList(Player player)
+    {
+        var ignoreListPacket = new IgnoreListPacket();
+
+        ignoreListPacket.Ignores = player.Ignores;
+
+        player.SendTunneled(ignoreListPacket);
+    }
+
+    private void UpdateFriendStatus(Player player)
+    {
+        var friendOnlinePacket = new FriendOnlinePacket();
+
+        friendOnlinePacket.Guid = player.Guid;
+
+        friendOnlinePacket.IsLocal = true;
+
+        var friendStatusPacket = new FriendStatusPacket
+        {
+            Guid = player.Guid,
+            Status =
+            {
+                ProfileId = player.ActiveProfile.Id,
+                ProfileRank = player.ActiveProfile.Rank,
+                ProfileIconId = player.ActiveProfile.Icon,
+                ProfileNameId = player.ActiveProfile.NameId,
+                ProfileBackgroundImageId = player.ActiveProfile.BadgeImageSet
+            }
+        };
+
+        foreach (var friend in player.Friends)
+        {
+            if (!_zoneManager.TryGetPlayer(friend.Guid, out var friendPlayer))
+                continue;
+
+            var otherFriendPlayer = friendPlayer.Friends.FirstOrDefault(x => x.Guid == player.Guid);
+
+            if (otherFriendPlayer is null || otherFriendPlayer.Online)
+                continue;
+
+            otherFriendPlayer.Online = true;
+
+            friendPlayer.SendTunneled(friendOnlinePacket);
+            friendPlayer.SendTunneled(friendStatusPacket);
+        }
+    }
+
+    #endregion
+
+    public int GetZoneAreaId(Vector4 position)
+    {
+        foreach (var areaDefinition in _zoneDefinition.AreaDefinitions)
+        {
+            if (areaDefinition.Shape == "Circle")
+            {
+                var circle = new Vector3(areaDefinition.X1, 0, areaDefinition.Z1);
+
+                if (position.IsInCircle(circle, areaDefinition.Radius))
+                    return areaDefinition.Id;
+            }
+            else if (areaDefinition.Shape == "Rectangle")
+            {
+                var p1 = new Vector3(areaDefinition.X1, 0, areaDefinition.Z1);
+                var p2 = new Vector3(areaDefinition.X2, 0, areaDefinition.Z2);
+
+                if (position.IsInRectangle(p1, p2))
+                    return areaDefinition.Id;
+            }
+            else
+            {
+                throw new NotImplementedException(nameof(areaDefinition.Shape));
+            }
+        }
+
+        return 0;
+    }
+}
