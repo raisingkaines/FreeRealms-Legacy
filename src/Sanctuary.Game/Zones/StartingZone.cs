@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Sanctuary.Core.Extensions;
 using Sanctuary.Core.IO;
 using Sanctuary.Game.Entities;
+using Sanctuary.Game.Quests;
 using Sanctuary.Game.Resources.Definitions.Zones;
 using Sanctuary.Packet;
 using Sanctuary.Packet.Common;
@@ -18,6 +19,7 @@ public sealed class StartingZone : BaseZone
 {
     private readonly IZoneManager _zoneManager;
     private readonly IResourceManager _resourceManager;
+    private readonly IQuestManager _questManager;
     private readonly StartingZoneDefinition _zoneDefinition;
 
     public StartingZone(StartingZoneDefinition zoneDefinition, IServiceProvider serviceProvider)
@@ -27,6 +29,7 @@ public sealed class StartingZone : BaseZone
 
         _zoneManager = serviceProvider.GetRequiredService<IZoneManager>();
         _resourceManager = serviceProvider.GetRequiredService<IResourceManager>();
+        _questManager = serviceProvider.GetRequiredService<IQuestManager>();
     }
 
     #region Client Is Ready
@@ -83,6 +86,16 @@ public sealed class StartingZone : BaseZone
         SendIgnoreList(player);
 
         UpdateFriendStatus(player);
+
+        _questManager.RestoreJournal(player);
+
+        // Cursors and interact ranges are zone state, set once when the zone starts. What is left
+        // here is the part that differs per player: which npcs show this player a quest marker.
+        foreach (var npc in Npcs)
+        {
+            if (_questManager.IsQuestNpc(npc.Guid))
+                _questManager.RefreshQuestNotification(player, npc.Guid);
+        }
     }
 
     private void SendQuickChatData(Player player)

@@ -11,6 +11,7 @@ using Sanctuary.Core.IO;
 using Sanctuary.Database;
 using Sanctuary.Database.Entities;
 using Sanctuary.Game;
+using Sanctuary.Game.Quests;
 using Sanctuary.Game.Entities;
 using Sanctuary.Packet;
 using Sanctuary.Packet.Common;
@@ -24,6 +25,7 @@ public static class CommandPacketInteractRequestHandler
     private static ILogger _logger = null!;
     private static IDbContextFactory<DatabaseContext> _dbContextFactory = null!;
     private static IResourceManager _resourceManager = null!;
+    private static IQuestManager _questManager = null!;
 
     public static void ConfigureServices(IServiceProvider serviceProvider)
     {
@@ -31,6 +33,7 @@ public static class CommandPacketInteractRequestHandler
         _logger = loggerFactory.CreateLogger(nameof(CommandPacketInteractRequestHandler));
         _dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<DatabaseContext>>();
         _resourceManager = serviceProvider.GetRequiredService<IResourceManager>();
+        _questManager = serviceProvider.GetRequiredService<IQuestManager>();
     }
 
     public static bool HandlePacket(GatewayConnection connection, ReadOnlySpan<byte> data)
@@ -48,6 +51,15 @@ public static class CommandPacketInteractRequestHandler
 
         if (entity is CollectionNode collectionNode)
             return HandleCollectionNode(connection, collectionNode);
+
+        if (entity is Npc npc && _questManager.IsQuestNpc(npc.Guid))
+        {
+            connection.Player.LastInteractNpcGuid = npc.Guid;
+            connection.Player.LastInteractAt = DateTime.UtcNow;
+
+            _questManager.OnNpcInteract(connection.Player, npc);
+            return true;
+        }
 
         entity.OnInteract(connection.Player);
         return true;
@@ -68,6 +80,15 @@ public static class CommandPacketInteractRequestHandler
             return true;
 
         connection.Player.Dismount();
+
+        // A node type with no drop table exists only for quest credit, so there is no item to grant.
+        if (node.TypeDefinition.DropTable.Count == 0)
+        {
+            node.CompleteCollection();
+            _questManager.OnCollectionNodeGathered(connection.Player, node);
+
+            return true;
+        }
 
         var itemPersisted = false;
         var nodeCompleted = false;
@@ -163,6 +184,9 @@ public static class CommandPacketInteractRequestHandler
             // capture-validated and refreshes an already-open collection panel.
             connection.SendSelfToClient();
             SendCollectionRewardToast(connection, clientItem, itemDefinition, node);
+
+            _questManager.OnCollectionNodeGathered(connection.Player, node);
+
             return true;
         }
         catch (Exception ex)
